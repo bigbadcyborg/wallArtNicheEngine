@@ -1,0 +1,26 @@
+# nicheScorer weights — editable without code changes (SRS §7.2, §8.4).
+# nicheScore = demand*w + price*w + trend*w + visualGap*w - competition*w - ipRisk*w
+weights:
+  demandScore: 0.25
+  priceScore: 0.20
+  trendScore: 0.20
+  visualGapScore: 0.20
+  competitionScore: 0.10   # subtracted
+  ipRiskScore: 0.25        # subtracted
+
+# Niches scoring below this are flagged needsReview; ipRiskScore >= block_ip_risk is blocked outright.
+thresholds:
+  min_niche_score: 20
+  block_ip_risk: 80
+
+# Price band (USD) considered healthy for digital wall art; used by priceScore.
+price:
+  floor: 3.0
+  sweet_low: 6.0
+  sweet_high: 18.0
+  ceiling: 40.0
+
+# Listing-count bands used by competitionScore (higher count -> more competition).
+competition:
+  low: 200
+  high: 5000

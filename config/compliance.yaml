@@ -1,0 +1,75 @@
+# IP-risk blocklist — editable without code changes (SRS §7.2 auto-reject, §7.6, SOUL.md forbiddenActions).
+# Matching is case-insensitive, whole-word where possible.
+
+blocked_terms:
+  franchises:
+    - disney
+    - marvel
+    - pixar
+    - pokemon
+    - pokémon
+    - barbie
+    - star wars
+    - harry potter
+    - lord of the rings
+    - minecraft
+    - fortnite
+    - hello kitty
+    - sanrio
+    - nintendo
+    - mario
+    - zelda
+    - studio ghibli
+    - anime character
+  sports:
+    - nfl
+    - nba
+    - mlb
+    - nhl
+    - ncaa
+    - fifa
+    - olympics
+    - super bowl
+    - world cup
+  brands:
+    - nike
+    - adidas
+    - gucci
+    - chanel
+    - louis vuitton
+    - coca-cola
+    - coca cola
+    - starbucks
+    - apple logo
+    - jeep
+    - harley davidson
+  music_film:
+    - taylor swift
+    - beyonce
+    - beyoncé
+    - drake lyrics
+    - song lyrics
+    - movie quote
+    - film quote
+
+# Phrases that indicate imitation of living artists or protected styles.
+flag_patterns:
+  - "in the style of"
+  - "inspired by @"
+  - "like banksy"
+  - "banksy style"
+  - "kaws"
+  - "murakami"
+  - "celebrity"
+  - "famous person"
+  - "team logo"
+  - "trademarked"
+
+# Terms that force AI-disclosure review on Etsy listings.
+ai_disclosure_triggers:
+  - ai generated
+  - ai-generated
+  - ai art
+  - midjourney
+  - stable diffusion
+  - dall-e

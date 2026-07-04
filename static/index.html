@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wallArtNicheEngine</title>
+<style>
+  :root { --bg:#101418; --panel:#1a2129; --line:#2a3441; --text:#e6edf3; --dim:#8b98a5;
+          --accent:#d08b5b; --ok:#4caf7d; --warn:#e0b341; --bad:#e06c5b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Georgia,'Times New Roman',serif; background:var(--bg); color:var(--text); }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:16px; }
+  header h1 { margin:0; font-size:20px; color:var(--accent); font-style:italic; }
+  header .mode { font-size:12px; color:var(--dim); font-family:monospace; }
+  nav { display:flex; gap:4px; padding:0 24px; border-bottom:1px solid var(--line); }
+  nav button { background:none; border:none; color:var(--dim); padding:12px 14px; cursor:pointer;
+               font:inherit; font-size:14px; border-bottom:2px solid transparent; }
+  nav button.active { color:var(--text); border-bottom-color:var(--accent); }
+  main { padding:24px; max-width:1200px; margin:0 auto; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }
+  .stat { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; }
+  .stat .n { font-size:26px; }
+  .stat .l { font-size:12px; color:var(--dim); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:var(--dim); font-weight:normal; padding:6px 8px; border-bottom:1px solid var(--line); }
+  td { padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; font-family:monospace; }
+  .pill.approved,.pill.passed,.pill.draftCreated,.pill.publishApproved { background:#1d3a2b; color:var(--ok); }
+  .pill.pending,.pill.draft,.pill.pendingReview,.pill.needsReview,.pill.needsRevision,.pill.new,.pill.researched { background:#3a331d; color:var(--warn); }
+  .pill.blocked,.pill.rejected,.pill.failed { background:#3a221d; color:var(--bad); }
+  button.act { background:var(--accent); color:#181210; border:none; border-radius:5px;
+               padding:5px 10px; cursor:pointer; font-size:12px; margin:1px; }
+  button.act.ghost { background:transparent; color:var(--dim); border:1px solid var(--line); }
+  input,select { background:#0d1116; color:var(--text); border:1px solid var(--line);
+                 border-radius:5px; padding:7px 10px; font:inherit; font-size:13px; }
+  form.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  h2 { font-size:16px; font-weight:normal; color:var(--accent); }
+  .dim { color:var(--dim); font-size:12px; }
+  #toast { position:fixed; bottom:20px; right:20px; background:var(--panel); border:1px solid var(--accent);
+           padding:10px 16px; border-radius:6px; display:none; max-width:420px; font-size:13px; }
+  details summary { cursor:pointer; color:var(--dim); font-size:12px; }
+  ul.plain { margin:6px 0; padding-left:18px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>wallArtNicheEngine</h1>
+  <span class="mode" id="modeLabel"></span>
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+<div id="toast"></div>
+
+<script>
+const TABS = ["Dashboard","Research","Niches","Briefs","Designs","Listings","Reviews"];
+let activeTab = "Dashboard";
+
+const $ = (s)=>document.querySelector(s);
+const esc = (s)=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const pill = (s)=>`<span class="pill ${esc(s)}">${esc(s)}</span>`;
+
+function toast(msg, ms=3500){ const t=$("#toast"); t.textContent=msg; t.style.display="block";
+  clearTimeout(t._h); t._h=setTimeout(()=>t.style.display="none",ms); }
+
+async function api(path, opts={}){
+  const r = await fetch("/api"+path, opts);
+  if(!r.ok){
+    let msg = r.statusText;
+    try{ const j = await r.json();
+      msg = typeof j.detail==="object" ? (j.detail.gateFailures||[]).join(" | ") : (j.detail||msg);
+    }catch(e){}
+    throw new Error(msg);
+  }
+  return r.json();
+}
+const post = (p,body)=>api(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+
+function renderTabs(){
+  $("#tabs").innerHTML = TABS.map(t=>`<button class="${t===activeTab?"active":""}" onclick="go('${t}')">${t}</button>`).join("");
+}
+function go(tab){ activeTab=tab; renderTabs(); render(); }
+
+async function render(){
+  const v = $("#view"); v.innerHTML = '<p class="dim">loading…</p>';
+  try{
+    if(activeTab==="Dashboard") v.innerHTML = await dashboardView();
+    if(activeTab==="Research")  v.innerHTML = await researchView();
+    if(activeTab==="Niches")    v.innerHTML = await nichesView();
+    if(activeTab==="Briefs")    v.innerHTML = await briefsView();
+    if(activeTab==="Designs")   v.innerHTML = await designsView();
+    if(activeTab==="Listings")  v.innerHTML = await listingsView();
+    if(activeTab==="Reviews")   v.innerHTML = await reviewsView();
+  }catch(e){ v.innerHTML = `<p style="color:var(--bad)">${esc(e.message)}</p>`; }
+}
+
+/* ---------------- Dashboard ---------------- */
+async function dashboardView(){
+  const d = await api("/dashboard");
+  $("#modeLabel").textContent = `etsy: ${d.mode.etsy} · ai: ${d.mode.ai}`;
+  const c = d.counts;
+  const stats = [
+    ["Keywords",c.keywords],["Niches",c.niches],["Pending niche reviews",c.nichesPendingReview],
+    ["Blocked niches",c.nichesBlocked],["Briefs awaiting review",c.briefsAwaitingReview],
+    ["Approved designs",c.assetsApproved],["Blocked listings",c.listingsBlocked],
+    ["Etsy drafts created",c.etsyDraftsCreated],
+  ];
+  return `
+  <div class="grid">${stats.map(([l,n])=>`<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("")}</div>
+  <div class="card"><h2>Next recommended actions</h2>
+    <ul class="plain">${d.nextActions.map(a=>`<li>${esc(a)}</li>`).join("")}</ul></div>
+  <div class="card"><h2>Top niches</h2>${nicheTable(d.topNiches,false)}</div>
+  <div class="card"><h2>Niche performance (predicted vs actual)</h2><div id="perf">loading…</div></div>
+  ${loadPerf()}`;
+}
+function loadPerf(){
+  api("/analytics/niches").then(rows=>{
+    const el=$("#perf"); if(!el) return;
+    el.innerHTML = rows.length ? `<table><tr><th>predicted</th><th>views</th><th>favs</th><th>sales</th><th>revenue</th><th>recommendation</th></tr>
+      ${rows.map(r=>`<tr><td>${r.predictedScore}</td><td>${r.views}</td><td>${r.favorites}</td><td>${r.sales}</td><td>$${r.revenue.toFixed(2)}</td><td>${esc(r.recommendation)}</td></tr>`).join("")}</table>`
+      : '<span class="dim">no performance data yet — record views/sales on the Listings tab</span>';
+  }).catch(()=>{});
+  return "";
+}
+
+/* ---------------- Research ---------------- */
+async function researchView(){
+  const kws = await api("/keywords");
+  return `
+  <div class="card"><h2>Add seed keyword</h2>
+    <form class="row" onsubmit="return addKeyword(event)">
+      <input id="kwPhrase" placeholder="e.g. neutral western nursery" required style="width:320px">
+      <input id="kwCat" placeholder="category (optional)">
+      <button class="act">Research niche</button>
+      <span class="dim">runs research + scoring; flags IP-risk terms automatically</span>
+    </form></div>
+  <div class="card"><h2>Keywords</h2>
+    <a class="dim" href="/api/export/niches.csv">⬇ export niche report CSV</a>
+    <table><tr><th>phrase</th><th>category</th><th>status</th><th></th></tr>
+    ${kws.map(k=>`<tr><td>${esc(k.phrase)}</td><td>${esc(k.category||"")}</td><td>${pill(k.status)}</td>
+      <td><button class="act ghost" onclick="showListings('${k.keywordId}','${esc(k.phrase)}')">signals</button></td></tr>`).join("")}
+    </table><div id="signals"></div></div>`;
+}
+async function addKeyword(e){
+  e.preventDefault();
+  try{
+    const r = await post("/keywords",{phrase:$("#kwPhrase").value, category:$("#kwCat").value||null});
+    toast(`Researched "${r.keyword.phrase}" — ${r.listingsCollected} signals${r.sampleData?" (offline sample data)":""}; nicheScore ${r.niche.nicheScore} (${r.niche.status})`);
+    render();
+  }catch(err){ toast("Error: "+err.message); }
+  return false;
+}
+async function showListings(id, phrase){
+  const rows = await api(`/keywords/${id}/listings`);
+  $("#signals").innerHTML = `<h2>Signals: ${esc(phrase)}</h2>
+    <table><tr><th>title</th><th>price</th><th>reviews</th><th>rating</th><th>style</th></tr>
+    ${rows.map(r=>`<tr><td>${esc(r.listingTitle)}</td><td>${r.price??""}</td><td>${r.reviewCount??""}</td>
+      <td>${r.rating??""}</td><td>${esc(r.detectedStyle||"")}</td></tr>`).join("")}</table>`;
+}
+
+/* ---------------- Niches ---------------- */
+function nicheTable(rows, actions=true){
+  return `<table><tr><th>keyword</th><th>score</th><th>demand</th><th>compet.</th><th>price</th><th>trend</th><th>gap</th><th>ipRisk</th><th>status</th>${actions?"<th></th>":""}</tr>
+  ${rows.map(n=>`<tr>
+    <td>${esc(n.phrase||"")}<details><summary>why</summary><div class="dim">${Object.entries(n.explanation||{}).map(([k,v])=>`<b>${k}</b>: ${esc(v)}`).join("<br>")}
+      ${(n.riskFlags||[]).length?`<br><b style="color:var(--bad)">flags:</b> ${n.riskFlags.map(f=>esc(f.term)).join(", ")}`:""}</div></details></td>
+    <td><b>${n.nicheScore}</b></td><td>${n.demandScore}</td><td>${n.competitionScore}</td>
+    <td>${n.priceScore}</td><td>${n.trendScore}</td><td>${n.visualGapScore}</td><td>${n.ipRiskScore}</td>
+    <td>${pill(n.status)}</td>
+    ${actions?`<td>${n.status!=="blocked"&&n.status!=="approved"?`<button class="act" onclick="reviewEntity('/niches/${n.nicheId}/review','approve')">approve</button>
+      <button class="act ghost" onclick="reviewEntity('/niches/${n.nicheId}/review','reject')">reject</button>`:""}
+      ${n.status==="approved"?`<button class="act" onclick="genBriefs('${n.nicheId}')">generate briefs</button>`:""}</td>`:""}
+  </tr>`).join("")}</table>`;
+}
+async function nichesView(){
+  const rows = await api("/niches");
+  return `<div class="card"><h2>Niche reports (gate 1: nicheApproved)</h2>${nicheTable(rows)}</div>`;
+}
+async function reviewEntity(path, decision, extra){
+  const notes = decision==="reject" ? (prompt("Rejection notes (optional):")||"") : "";
+  try{ await post(path, Object.assign({decision, notes}, extra||{})); toast(`Recorded: ${decision}`); render(); }
+  catch(err){ toast("Error: "+err.message); }
+}
+async function genBriefs(nicheId){
+  toast("Generating briefs…", 8000);
+  try{ const rows = await post(`/niches/${nicheId}/briefs?count=5`); toast(`Generated ${rows.length} briefs (see Briefs tab)`); go("Briefs"); }
+  catch(err){ toast("Error: "+err.message); }
+}
+
+/* ---------------- Briefs ---------------- */
+async function briefsView(){
+  const rows = await api("/briefs");
+  if(!rows.length) return '<div class="card"><span class="dim">No briefs yet. Approve a niche, then click "generate briefs".</span></div>';
+  return `<div class="card"><h2>Design briefs (gate 2: briefApproved)</h2>
+  ${rows.map(b=>`<div class="card">
+    <b>${esc(b.nicheName)}</b> ${pill(b.status)} <span class="dim">by ${esc(b.generatedBy)}</span><br>
+    <span class="dim">buyer:</span> ${esc(b.targetBuyer)}<br>
+    <span class="dim">room:</span> ${esc(b.roomContext)} · <span class="dim">style:</span> ${esc(b.styleDirection)}<br>
+    <span class="dim">palette:</span> ${esc(b.colorPalette)} · <span class="dim">subject:</span> ${esc(b.subjectMatter)}<br>
+    <span class="dim">ratios:</span> ${(b.ratios||[]).join(", ")} · <span class="dim">format:</span> ${esc(b.productFormat)}<br>
+    <span class="dim">avoid:</span> ${esc(b.negativePrompt)}<br>
+    <span class="dim" style="color:var(--warn)">IP notes:</span> ${esc(b.ipSafetyNotes)}<br>
+    ${b.status==="draft"?`<button class="act" onclick="reviewEntity('/briefs/${b.briefId}/review','approve')">approve</button>
+      <button class="act ghost" onclick="reviewEntity('/briefs/${b.briefId}/review','reject')">reject</button>`:""}
+    ${b.status==="approved"?`<form class="row" onsubmit="return uploadAsset(event,'${b.briefId}')">
+      <input type="file" id="file-${b.briefId}" accept="image/*" required>
+      <label class="dim"><input type="checkbox" id="ai-${b.briefId}"> AI-assisted design</label>
+      <button class="act">upload master design</button></form>`:""}
+  </div>`).join("")}</div>`;
+}
+async function uploadAsset(e, briefId){
+  e.preventDefault();
+  const fd = new FormData();
+  fd.append("file", $(`#file-${briefId}`).files[0]);
+  fd.append("is_ai_assisted", $(`#ai-${briefId}`).checked);
+  toast("Processing image (ratio exports + bundle + QC)…", 15000);
+  try{
+    const r = await fetch(`/api/briefs/${briefId}/assets`,{method:"POST",body:fd});
+    if(!r.ok){ const j=await r.json(); throw new Error(j.detail||r.statusText); }
+    toast("Asset created — see Designs tab"); go("Designs");
+  }catch(err){ toast("Error: "+err.message); }
+  return false;
+}
+
+/* ---------------- Designs ---------------- */
+async function designsView(){
+  const rows = await api("/assets");
+  if(!rows.length) return '<div class="card"><span class="dim">No design assets yet. Approve a brief, then upload a master image.</span></div>';
+  return `<div class="card"><h2>Design assets (gates 3-5: design, quality, compliance)</h2>
+  ${rows.map(a=>`<div class="card">
+    <span class="dim">asset</span> <code>${a.assetId.slice(0,8)}</code>
+    ${a.isAiAssisted?'<span class="pill pending">AI-assisted → disclosure required</span>':""}
+    · quality ${pill(a.qualityStatus)} · compliance ${pill(a.complianceStatus)}<br>
+    <span class="dim">exports:</span> ${Object.keys(a.exports||{}).join(", ")||"none"} ·
+    <span class="dim">bundle:</span> ${a.bundlePath?esc(a.bundlePath.split(/[\\\\/]/).pop()):"none"}<br>
+    <details><summary>quality report</summary><table>
+      ${((a.qualityReport||{}).checks||[]).map(c=>`<tr><td>${c.ok?"✅":"❌"}</td><td>${esc(c.check)}</td><td class="dim">${esc(c.detail)}</td></tr>`).join("")}
+    </table></details>
+    ${a.qualityStatus==="passed"?`<button class="act" onclick="reviewEntity('/assets/${a.assetId}/review','approve',{gate:'quality'})">approve quality</button>
+      <button class="act ghost" onclick="reviewEntity('/assets/${a.assetId}/review','reject',{gate:'quality'})">reject</button>`:""}
+    ${a.complianceStatus==="pendingReview"?`<button class="act" onclick="reviewEntity('/assets/${a.assetId}/review','approve',{gate:'compliance'})">approve compliance</button>
+      <button class="act ghost" onclick="reviewEntity('/assets/${a.assetId}/review','needsRevision',{gate:'compliance'})">needs revision</button>`:""}
+    ${a.qualityStatus==="approved"&&a.complianceStatus==="approved"?`<button class="act" onclick="genListing('${a.assetId}')">generate listing</button>`:""}
+  </div>`).join("")}</div>`;
+}
+async function genListing(assetId){
+  toast("Generating listing metadata…", 8000);
+  try{ await post(`/assets/${assetId}/listings`); toast("Listing generated — see Listings tab"); go("Listings"); }
+  catch(err){ toast("Error: "+err.message); }
+}
+
+/* ---------------- Listings ---------------- */
+async function listingsView(){
+  const rows = await api("/listings");
+  if(!rows.length) return '<div class="card"><span class="dim">No listings yet. Approve an asset (quality + compliance), then generate a listing.</span></div>';
+  return `<div class="card"><h2>Listings (gates 6-7: listingApproved, publishApproved)</h2>
+  ${rows.map(l=>`<div class="card">
+    <b>${esc(l.title)}</b> ${pill(l.status)} <span class="dim">by ${esc(l.generatedBy)}</span><br>
+    <span class="dim">price:</span> $${l.price??"?"} · <span class="dim">tags:</span> ${(l.tags||[]).map(esc).join(", ")}<br>
+    ${l.aiDisclosure?`<span class="dim" style="color:var(--warn)">AI disclosure:</span> ${esc(l.aiDisclosure)}<br>`:""}
+    ${(l.complianceFlags||[]).length?`<span style="color:var(--bad)">compliance flags: ${l.complianceFlags.map(f=>esc(f.term)).join(", ")}</span><br>`:""}
+    ${l.externalListingId?`<span class="dim">Etsy listing id:</span> ${esc(l.externalListingId)}<br>`:""}
+    <details><summary>description</summary><pre style="white-space:pre-wrap;font-family:inherit" class="dim">${esc(l.description)}</pre></details>
+    ${l.status==="draft"?`<button class="act" onclick="reviewEntity('/listings/${l.listingId}/review','approve')">approve listing</button>`:""}
+    ${l.status==="approved"?`<button class="act" onclick="pubDraft('${l.listingId}')">create Etsy draft</button>
+      <button class="act ghost" onclick="merch('${l.listingId}')">Amazon Merch package (manual)</button>`:""}
+    ${l.status==="draftCreated"?`<button class="act" onclick="approvePub('${l.listingId}')">approve final publish (gate 7)</button>`:""}
+    ${l.status==="publishApproved"?`<span class="dim">✅ Approved — activate the draft manually in your Etsy shop.</span>`:""}
+    ${["draftCreated","publishApproved"].includes(l.status)?`
+      <form class="row" onsubmit="return perf(event,'${l.listingId}')">
+        <input id="pv-${l.listingId}" type="number" placeholder="views" style="width:80px">
+        <input id="pf-${l.listingId}" type="number" placeholder="favs" style="width:70px">
+        <input id="ps-${l.listingId}" type="number" placeholder="sales" style="width:70px">
+        <input id="pr-${l.listingId}" type="number" step="0.01" placeholder="revenue $" style="width:100px">
+        <button class="act ghost">record performance</button></form>`:""}
+  </div>`).join("")}</div>`;
+}
+async function pubDraft(id){
+  try{ const r = await post(`/listings/${id}/publish-draft`);
+    toast(r.etsyDryRun ? "Dry-run: draft payload stored (configure Etsy keys for live drafts)" : "Etsy draft created ✔"); render();
+  }catch(err){ toast("Gate check failed: "+err.message, 6000); }
+}
+async function approvePub(id){
+  try{ await post(`/listings/${id}/approve-publish`); toast("Publish approved — activate manually in Etsy."); render(); }
+  catch(err){ toast("Error: "+err.message); }
+}
+async function merch(id){
+  try{ const r = await post(`/listings/${id}/amazon-merch-package`); toast("Package built: "+r.packagePath, 6000); }
+  catch(err){ toast("Error: "+err.message, 6000); }
+}
+async function perf(e, id){
+  e.preventDefault();
+  try{
+    await post(`/listings/${id}/performance`,{
+      views:+($(`#pv-${id}`).value||0), favorites:+($(`#pf-${id}`).value||0),
+      sales:+($(`#ps-${id}`).value||0), revenue:+($(`#pr-${id}`).value||0)});
+    toast("Performance recorded"); render();
+  }catch(err){ toast("Error: "+err.message); }
+  return false;
+}
+
+/* ---------------- Reviews ---------------- */
+async function reviewsView(){
+  const rows = await api("/reviews");
+  return `<div class="card"><h2>Review audit log</h2>
+  <table><tr><th>when</th><th>entity</th><th>decision</th><th>reviewer</th><th>notes</th></tr>
+  ${rows.map(r=>`<tr><td class="dim">${r.createdAt.slice(0,19).replace("T"," ")}</td>
+    <td>${esc(r.entityType)} <code>${esc(r.entityId.slice(0,8))}</code></td>
+    <td>${pill(r.decision.split(":").pop())}</td><td>${esc(r.reviewerName)}</td><td class="dim">${esc(r.notes)}</td></tr>`).join("")}
+  </table></div>`;
+}
+
+renderTabs(); render();
+api("/dashboard").then(d=>{ $("#modeLabel").textContent = `etsy: ${d.mode.etsy} · ai: ${d.mode.ai}`; }).catch(()=>{});
+</script>
+</body>
+</html>
