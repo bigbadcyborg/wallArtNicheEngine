@@ -92,3 +92,30 @@ def test_generate_image_rejects_empty_prompt(db):
         assert r.status_code == 400
     finally:
         app.dependency_overrides.clear()
+
+
+def test_generation_dimension_mapper_supports_wall_art_ratios():
+    from app.connectors.dimensions import generation_dimensions_for
+
+    expected = {
+        "2:3": (1536, 2304),
+        "3:4": (1536, 2048),
+        "4:5": (1600, 2000),
+        "11:14": (1760, 2240),
+        "A-series": (1664, 2352),
+    }
+
+    for ratio, dimensions in expected.items():
+        assert generation_dimensions_for(ratio).as_tuple() == dimensions
+        width, height = dimensions
+        assert height > width
+
+
+def test_generation_dimension_mapper_accepts_export_aliases():
+    from app.connectors.dimensions import generation_dimensions_for
+
+    assert generation_dimensions_for("2x3").as_tuple() == (1536, 2304)
+    assert generation_dimensions_for("3x4").as_tuple() == (1536, 2048)
+    assert generation_dimensions_for("4x5").as_tuple() == (1600, 2000)
+    assert generation_dimensions_for("11x14").as_tuple() == (1760, 2240)
+    assert generation_dimensions_for("a series").as_tuple() == (1664, 2352)
