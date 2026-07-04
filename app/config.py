@@ -30,6 +30,9 @@ class Settings:
     anthropic_api_key: str | None = os.environ.get("ANTHROPIC_API_KEY")
     gemini_api_key: str | None = os.environ.get("GEMINI_API_KEY")
     gemini_image_model: str = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+    image_provider: str = os.environ.get("IMAGE_PROVIDER", "gemini").strip().lower()
+    comfyui_base_url: str = os.environ.get("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
+    comfyui_placeholder_on_failure: bool = os.environ.get("COMFYUI_PLACEHOLDER_ON_FAILURE", "").lower() in {"1", "true", "yes"}
     etsy_api_key: str | None = os.environ.get("ETSY_API_KEY")
     etsy_shop_id: str | None = os.environ.get("ETSY_SHOP_ID")
     etsy_access_token: str | None = os.environ.get("ETSY_ACCESS_TOKEN")
