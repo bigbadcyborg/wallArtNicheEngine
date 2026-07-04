@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import get_db
-from .connectors import ai_provider, gemini
+from .connectors import ai_provider, comfyui, gemini
 from .models import (DesignAsset, DesignBrief, GeneratedImage, Keyword,
                      Listing, NicheReport, PerformanceRecord, ResearchListing,
                      ReviewLog)
@@ -144,8 +144,13 @@ def image_prompt(brief_id: str, db: Session = Depends(get_db)):
     brief = db.get(DesignBrief, brief_id)
     if not brief:
         raise HTTPException(404, "brief not found")
-    return {"briefId": brief_id, "nicheName": brief.nicheName,
-            "prompt": ai_provider.build_image_prompt(brief)}
+    positive_prompt = ai_provider.build_image_prompt(brief)
+    return {
+        "briefId": brief_id,
+        "nicheName": brief.nicheName,
+        "prompt": positive_prompt,
+        **comfyui.build_prompt_pair(positive_prompt),
+    }
 
 
 class GenerateImageIn(BaseModel):

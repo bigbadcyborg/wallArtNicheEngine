@@ -4,7 +4,7 @@ import io
 import pytest
 from PIL import Image
 
-from app.connectors import ai_provider, gemini
+from app.connectors import ai_provider, comfyui, gemini
 from app.models import DesignBrief, Keyword
 from app.modules import briefs as briefs_mod, research, scoring
 
@@ -37,6 +37,33 @@ def test_build_image_prompt_reserves_text_space_for_verse_niches(approved_brief)
     approved_brief.nicheName = "nursery bible verse"
     prompt = ai_provider.build_image_prompt(approved_brief)
     assert "open area in the center" in prompt
+
+
+
+def test_comfyui_prompt_pair_uses_build_image_prompt_output(approved_brief):
+    positive = ai_provider.build_image_prompt(approved_brief)
+    pair = comfyui.build_prompt_pair(positive)
+    assert pair["positivePrompt"] == positive
+    assert pair["negativePrompt"] == comfyui.STANDARD_NEGATIVE_PROMPT
+    assert "watermark" in pair["negativePrompt"]
+    assert "mockup" in pair["negativePrompt"]
+
+
+def test_image_prompt_api_returns_comfyui_split_prompts(db, approved_brief):
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    _override_db(app, db)
+    client = TestClient(app)
+    try:
+        r = client.get(f"/api/briefs/{approved_brief.briefId}/image-prompt")
+        assert r.status_code == 200, r.text
+        payload = r.json()
+        assert payload["positivePrompt"] == payload["prompt"]
+        assert payload["positivePrompt"] == ai_provider.build_image_prompt(approved_brief)
+        assert payload["negativePrompt"] == comfyui.STANDARD_NEGATIVE_PROMPT
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_placeholder_generation_without_key():
