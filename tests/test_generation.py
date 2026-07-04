@@ -92,3 +92,68 @@ def test_generate_image_rejects_empty_prompt(db):
         assert r.status_code == 400
     finally:
         app.dependency_overrides.clear()
+
+
+def test_comfyui_connector_submits_polls_and_downloads(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.connectors import comfyui
+
+    workflow = {
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "old", "clip": ["4", 1]}},
+        "9": {"class_type": "SaveImage", "inputs": {}},
+    }
+    workflow_path = tmp_path / "workflow.json"
+    workflow_path.write_text(__import__("json").dumps(workflow), encoding="utf-8")
+
+    monkeypatch.setattr(settings, "comfyui_workflow_path", str(workflow_path))
+    monkeypatch.setattr(settings, "comfyui_base_url", "http://comfy.test")
+    monkeypatch.setattr(settings, "comfyui_timeout_seconds", 2)
+    monkeypatch.setattr(settings, "comfyui_prompt_node_id", "6")
+    monkeypatch.setattr(settings, "comfyui_output_node_id", "9")
+
+    class FakeResponse:
+        is_error = False
+        text = ""
+
+        def __init__(self, payload=None, content=b""):
+            self._payload = payload or {}
+            self.content = content
+            self.status_code = 200
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        submitted = None
+        viewed = None
+
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, path, json):
+            assert path == "/prompt"
+            FakeClient.submitted = json
+            return FakeResponse({"prompt_id": "abc"})
+
+        def get(self, path, params=None):
+            if path == "/history/abc":
+                return FakeResponse({"abc": {"status": {"completed": True}, "outputs": {"9": {"images": [{"filename": "out.png", "subfolder": "", "type": "output"}]}}}})
+            assert path == "/view"
+            FakeClient.viewed = params
+            return FakeResponse(content=b"png-bytes")
+
+    monkeypatch.setattr(comfyui.httpx, "Client", FakeClient)
+
+    image_bytes, model, placeholder = comfyui.generate_image("new prompt", "4:5")
+
+    assert image_bytes == b"png-bytes"
+    assert model == "comfyui:workflow"
+    assert placeholder is False
+    assert FakeClient.submitted["prompt"]["6"]["inputs"]["text"] == "new prompt"
+    assert FakeClient.viewed == {"filename": "out.png", "subfolder": "", "type": "output"}
