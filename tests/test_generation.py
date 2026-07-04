@@ -92,3 +92,38 @@ def test_generate_image_rejects_empty_prompt(db):
         assert r.status_code == 400
     finally:
         app.dependency_overrides.clear()
+
+
+def test_comfyui_generation_stores_image_for_existing_attach_route(monkeypatch, db, approved_brief):
+    from fastapi.testclient import TestClient
+    from app.connectors import comfyui
+    from app.main import app
+
+    def fake_generate_image(prompt, aspect_ratio):
+        img = Image.new("RGB", (4000, 5000), (120, 90, 70))
+        buf = io.BytesIO()
+        img.save(buf, "PNG", dpi=(300, 300))
+        return buf.getvalue(), "comfyui-test", False
+
+    monkeypatch.setattr(comfyui, "generate_image", fake_generate_image)
+    _override_db(app, db)
+    client = TestClient(app)
+    try:
+        r = client.post(
+            "/api/generate-image",
+            json={"prompt": "soft botanical print", "aspectRatio": "4:5", "source": "comfyui"},
+        )
+        assert r.status_code == 200, r.text
+        gen = r.json()
+        assert gen["model"] == "comfyui-test"
+        assert gen["isPlaceholder"] is False
+        assert gen["attachedAssetId"] is None
+
+        r = client.post(f"/api/generated-images/{gen['id']}/attach",
+                        json={"briefId": approved_brief.briefId})
+        assert r.status_code == 200, r.text
+        asset = r.json()
+        assert asset["isAiAssisted"] is True
+        assert asset["qualityStatus"] == "passed"
+    finally:
+        app.dependency_overrides.clear()

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import get_db
-from .connectors import ai_provider, gemini
+from .connectors import ai_provider, comfyui, gemini
 from .models import (DesignAsset, DesignBrief, GeneratedImage, Keyword,
                      Listing, NicheReport, PerformanceRecord, ResearchListing,
                      ReviewLog)
@@ -151,6 +151,7 @@ def image_prompt(brief_id: str, db: Session = Depends(get_db)):
 class GenerateImageIn(BaseModel):
     prompt: str
     aspectRatio: str = "4:5"
+    source: str = "gemini"
 
 
 def _gen_url(g: GeneratedImage) -> str:
@@ -165,11 +166,11 @@ def _gen(g: GeneratedImage) -> dict:
 
 @router.post("/generate-image")
 def generate_image(body: GenerateImageIn, db: Session = Depends(get_db)):
-    """One stateless Gemini call per request — a fresh context every time."""
+    """Generate image bytes and store them for the existing attach pipeline."""
     if not body.prompt.strip():
         raise HTTPException(400, "prompt is required")
     try:
-        image_bytes, model, placeholder = gemini.generate_image(body.prompt, body.aspectRatio)
+        image_bytes, model, placeholder = _generate_image_bytes(body)
     except RuntimeError as e:
         raise HTTPException(502, str(e))
 
@@ -185,6 +186,15 @@ def generate_image(body: GenerateImageIn, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(row)
     return _gen(row)
+
+
+def _generate_image_bytes(body: GenerateImageIn) -> tuple[bytes, str, bool]:
+    source = body.source.strip().lower()
+    if source == "gemini":
+        return gemini.generate_image(body.prompt, body.aspectRatio)
+    if source == "comfyui":
+        return comfyui.generate_image(body.prompt, body.aspectRatio)
+    raise HTTPException(400, "source must be either gemini or comfyui")
 
 
 @router.get("/generated-images")
