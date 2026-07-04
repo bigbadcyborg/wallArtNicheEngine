@@ -1,0 +1,120 @@
+{
+  "_meta": {
+    "template_name": "wall_art_sdxl_txt2img",
+    "template_version": "1.0.0",
+    "description": "Portrait SDXL text-to-image workflow template for original printable wall art. Replace {{...}} placeholders at runtime before submitting to ComfyUI.",
+    "recommended_output_handling": "Generates a 2048x2560 portrait master and relies on /api/generated-images/{image_id}/attach to upscale to the downstream 4000x5000 minimum before asset creation.",
+    "placeholders": {
+      "positive_prompt": "Text prompt describing the original wall art image to generate.",
+      "negative_prompt": "Text prompt describing visual defects or unwanted artifacts to avoid.",
+      "width": "Generation width in pixels. Default: 2048.",
+      "height": "Generation height in pixels. Default: 2560.",
+      "seed": "KSampler seed. Use a fixed integer for reproducibility or replace with a randomized seed.",
+      "batch_size": "Number of images to generate in one batch.",
+      "steps": "KSampler step count.",
+      "cfg": "Classifier-free guidance scale.",
+      "sampler": "ComfyUI sampler name, for example dpmpp_2m_sde.",
+      "scheduler": "ComfyUI scheduler name, for example karras.",
+      "checkpoint_name": "Checkpoint/model filename available to CheckpointLoaderSimple.",
+      "filename_prefix": "SaveImage filename prefix for generated outputs."
+    },
+    "default_runtime_values": {
+      "positive_prompt": "Original fine art botanical composition, soft layered watercolor texture, sage green and warm neutral palette, clean portrait layout, balanced negative space, print-ready detail",
+      "negative_prompt": "low quality, blurry, distorted, noisy, pixelated, jpeg artifacts, oversaturated, harsh shadows, cropped edges, duplicate elements, malformed shapes",
+      "width": 2048,
+      "height": 2560,
+      "seed": 123456789,
+      "batch_size": 1,
+      "steps": 30,
+      "cfg": 7.0,
+      "sampler": "dpmpp_2m_sde",
+      "scheduler": "karras",
+      "checkpoint_name": "sd_xl_base_1.0.safetensors",
+      "filename_prefix": "wall_art_sdxl_txt2img"
+    }
+  },
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "{{checkpoint_name}}"
+    }
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "1",
+        1
+      ],
+      "text": "{{positive_prompt}}"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "1",
+        1
+      ],
+      "text": "{{negative_prompt}}"
+    }
+  },
+  "4": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": "{{width}}",
+      "height": "{{height}}",
+      "batch_size": "{{batch_size}}"
+    }
+  },
+  "5": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "2",
+        0
+      ],
+      "negative": [
+        "3",
+        0
+      ],
+      "latent_image": [
+        "4",
+        0
+      ],
+      "seed": "{{seed}}",
+      "steps": "{{steps}}",
+      "cfg": "{{cfg}}",
+      "sampler_name": "{{sampler}}",
+      "scheduler": "{{scheduler}}",
+      "denoise": 1.0
+    }
+  },
+  "6": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "5",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    }
+  },
+  "7": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "6",
+        0
+      ],
+      "filename_prefix": "{{filename_prefix}}"
+    }
+  }
+}
