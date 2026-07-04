@@ -140,6 +140,19 @@ class Listing(Base):
     performance = relationship("PerformanceRecord", back_populates="listing", cascade="all, delete-orphan")
 
 
+class GeneratedImage(Base):
+    """Images produced on the Generate tab (Gemini Nano Banana or placeholder)."""
+    __tablename__ = "generated_images"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    prompt: Mapped[str] = mapped_column(Text)
+    aspectRatio: Mapped[str] = mapped_column(String, default="4:5")
+    filePath: Mapped[str] = mapped_column(String)
+    model: Mapped[str] = mapped_column(String, default="placeholder")
+    isPlaceholder: Mapped[bool] = mapped_column(Boolean, default=False)
+    attachedAssetId: Mapped[str | None] = mapped_column(String, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 class ReviewLog(Base):
     """Audit trail for every human gate decision (SRS §8.5)."""
     __tablename__ = "review_logs"

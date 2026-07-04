@@ -100,6 +100,49 @@ def _generate_json(prompt: str, schema: dict) -> dict | None:
         return None
 
 
+# ---------------------------------------------------------------- image prompt
+
+_STANDARD_AVOID = (
+    "any text, letters, words, numbers, signatures, watermarks, logos, brand names, "
+    "copyrighted characters, celebrity likenesses, or recognizable trademarked imagery"
+)
+
+
+def build_image_prompt(brief) -> str:
+    """Deterministic image-model prompt built from a DesignBrief.
+
+    Specs match the quality gate: portrait, >=4000x5000px so ratio exports never
+    hit the 2x upscale cap, edge-safe composition for all five crop ratios.
+    """
+    needs_text_space = any(
+        w in f"{brief.nicheName} {brief.subjectMatter}".lower()
+        for w in ("verse", "quote", "saying", "lyric", "text", "word")
+    )
+    composition = brief.composition or "balanced composition with generous negative space"
+    if needs_text_space:
+        composition += (
+            ". Leave a large open area in the center for typography — the designer adds "
+            "the text later; the image itself must contain NO text"
+        )
+    avoid = f"{brief.negativePrompt.rstrip('. ')}, plus: {_STANDARD_AVOID}" if brief.negativePrompt else _STANDARD_AVOID
+
+    return (
+        "Create a print-ready wall art design for an Etsy digital download.\n\n"
+        f"SUBJECT: {brief.subjectMatter or brief.nicheName}\n"
+        f"STYLE: {brief.styleDirection}\n"
+        f"COLOR PALETTE: {brief.colorPalette}\n"
+        f"MOOD / ROOM: designed for a {brief.roomContext or 'home'}, cohesive and calming\n"
+        f"COMPOSITION: {composition}, nothing important within 10% of the edges "
+        "(safe for cropping to 2:3, 3:4, 4:5, 11x14 and A-series print ratios)\n\n"
+        "TECHNICAL REQUIREMENTS:\n"
+        "- portrait orientation, minimum 4000 x 5000 pixels\n"
+        "- flat 2D artwork only: no mockup, no frame, no wall, no room scene, no shadows\n"
+        "- clean solid or softly textured background, print-friendly colors (no neon)\n"
+        "- high detail, no compression artifacts\n\n"
+        f"DO NOT INCLUDE: {avoid}"
+    )
+
+
 # ---------------------------------------------------------------- briefs
 
 def generate_briefs(niche_context: dict, count: int = 5) -> tuple[list[dict], str]:

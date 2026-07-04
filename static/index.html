@@ -53,7 +53,7 @@
 <div id="toast"></div>
 
 <script>
-const TABS = ["Dashboard","Research","Niches","Briefs","Designs","Listings","Reviews"];
+const TABS = ["Dashboard","Research","Niches","Briefs","Prompt","Generate","Designs","Listings","Reviews"];
 let activeTab = "Dashboard";
 
 const $ = (s)=>document.querySelector(s);
@@ -88,6 +88,8 @@ async function render(){
     if(activeTab==="Research")  v.innerHTML = await researchView();
     if(activeTab==="Niches")    v.innerHTML = await nichesView();
     if(activeTab==="Briefs")    v.innerHTML = await briefsView();
+    if(activeTab==="Prompt")    v.innerHTML = await promptView();
+    if(activeTab==="Generate")  v.innerHTML = await generateView();
     if(activeTab==="Designs")   v.innerHTML = await designsView();
     if(activeTab==="Listings")  v.innerHTML = await listingsView();
     if(activeTab==="Reviews")   v.innerHTML = await reviewsView();
@@ -222,6 +224,87 @@ async function uploadAsset(e, briefId){
   return false;
 }
 
+/* ---------------- Prompt builder ---------------- */
+let pendingPrompt = "";
+async function promptView(){
+  const briefs = await api("/briefs");
+  if(!briefs.length) return '<div class="card"><span class="dim">No briefs yet. Approve a niche and generate briefs first — the prompt is built from a brief.</span></div>';
+  return `<div class="card"><h2>Image-model prompt builder</h2>
+    <p class="dim">Builds a copy-paste prompt for any image AI (Midjourney, Gemini, DALL·E…) from a design brief.
+    Specs match the quality gate: portrait ≥4000×5000px, crop-safe for all five print ratios, no text/brands.</p>
+    <form class="row" onsubmit="return buildPrompt(event)">
+      <select id="promptBrief">${briefs.map(b=>`<option value="${b.briefId}">${esc(b.nicheName)} — ${esc(b.styleDirection).slice(0,50)} [${b.status}]</option>`).join("")}</select>
+      <button class="act">Build prompt</button>
+    </form>
+    <div id="promptOut"></div></div>`;
+}
+async function buildPrompt(e){
+  e.preventDefault();
+  try{
+    const r = await api(`/briefs/${$("#promptBrief").value}/image-prompt`);
+    $("#promptOut").innerHTML = `
+      <textarea id="promptText" style="width:100%;height:320px;margin-top:12px" readonly>${esc(r.prompt)}</textarea><br>
+      <button class="act" onclick="navigator.clipboard.writeText($('#promptText').value).then(()=>toast('Copied to clipboard'))">copy</button>
+      <button class="act ghost" onclick="pendingPrompt=$('#promptText').value; go('Generate')">send to Generate tab →</button>`;
+  }catch(err){ toast("Error: "+err.message); }
+  return false;
+}
+
+/* ---------------- Generate (Gemini Nano Banana) ---------------- */
+async function generateView(){
+  const [imgs, briefs, dash] = await Promise.all([api("/generated-images"), api("/briefs"), api("/dashboard")]);
+  const approved = briefs.filter(b=>b.status==="approved");
+  const briefOpts = approved.map(b=>`<option value="${b.briefId}">${esc(b.nicheName)} — ${esc(b.styleDirection).slice(0,40)}</option>`).join("");
+  const html = `<div class="card"><h2>Generate image (Gemini Nano Banana)</h2>
+    <p class="dim">Each prompt is sent as a brand-new, stateless request — no chat history is carried between generations.
+    ${dash.mode?"":""}Placeholder mode is used until GEMINI_API_KEY is set.</p>
+    <textarea id="genPrompt" style="width:100%;height:180px" placeholder="Paste or write an image prompt… (or build one on the Prompt tab)">${esc(pendingPrompt)}</textarea>
+    <form class="row" style="margin-top:8px" onsubmit="return genImage(event)">
+      <label class="dim">aspect ratio
+        <select id="genRatio"><option>4:5</option><option>2:3</option><option>3:4</option><option>1:1</option><option>9:16</option></select></label>
+      <button class="act">Generate image</button>
+      <span class="dim" id="genBusy"></span>
+    </form></div>
+    <div class="card"><h2>Generated images</h2>
+    ${imgs.length? imgs.map(g=>`<div class="card" style="display:flex;gap:14px">
+      <a href="${g.url}" target="_blank"><img src="${g.url}" style="width:150px;border-radius:6px;border:1px solid var(--line)"></a>
+      <div style="flex:1">
+        <span class="dim">${g.createdAt.slice(0,19).replace("T"," ")}</span> ·
+        <span class="pill ${g.isPlaceholder?"pending":"approved"}">${esc(g.model)}</span> · ${esc(g.aspectRatio)}
+        ${g.attachedAssetId?` · <span class="pill approved">attached</span>`:""}
+        <details><summary>prompt</summary><pre style="white-space:pre-wrap;font-family:inherit" class="dim">${esc(g.prompt)}</pre></details>
+        ${!g.attachedAssetId ? (approved.length
+          ? `<form class="row" onsubmit="return attachGen(event,'${g.id}')">
+               <select id="attach-${g.id}">${briefOpts}</select>
+               <button class="act">use as design for brief</button></form>`
+          : '<span class="dim">approve a brief to attach this image as a design</span>') : ""}
+      </div></div>`).join("")
+    : '<span class="dim">nothing generated yet</span>'}</div>`;
+  pendingPrompt = "";
+  return html;
+}
+async function genImage(e){
+  e.preventDefault();
+  const prompt = $("#genPrompt").value.trim();
+  if(!prompt){ toast("Write or paste a prompt first"); return false; }
+  $("#genBusy").textContent = "generating… (can take up to a minute)";
+  try{
+    const g = await post("/generate-image",{prompt, aspectRatio:$("#genRatio").value});
+    toast(g.isPlaceholder ? "Placeholder generated (set GEMINI_API_KEY for real images)" : "Image generated ✔");
+    pendingPrompt = prompt; render();
+  }catch(err){ $("#genBusy").textContent=""; toast("Error: "+err.message, 6000); }
+  return false;
+}
+async function attachGen(e, imageId){
+  e.preventDefault();
+  toast("Attaching: exports + bundle + quality checks…", 15000);
+  try{
+    await post(`/generated-images/${imageId}/attach`,{briefId:$(`#attach-${imageId}`).value});
+    toast("Asset created (AI-assisted) — see Designs tab"); go("Designs");
+  }catch(err){ toast("Error: "+err.message, 6000); }
+  return false;
+}
+
 /* ---------------- Designs ---------------- */
 async function designsView(){
   const rows = await api("/assets");
@@ -232,7 +315,9 @@ async function designsView(){
     ${a.isAiAssisted?'<span class="pill pending">AI-assisted → disclosure required</span>':""}
     · quality ${pill(a.qualityStatus)} · compliance ${pill(a.complianceStatus)}<br>
     <span class="dim">exports:</span> ${Object.keys(a.exports||{}).join(", ")||"none"} ·
-    <span class="dim">bundle:</span> ${a.bundlePath?esc(a.bundlePath.split(/[\\\\/]/).pop()):"none"}<br>
+    <span class="dim">bundle:</span> ${a.bundlePath
+      ?`<button class="act ghost" title="Open containing folder" onclick="openBundle('${a.assetId}')">📂 ${esc(a.bundlePath.split(/[\\\\/]/).pop())}</button>`
+      :"none"}<br>
     <details><summary>quality report</summary><table>
       ${((a.qualityReport||{}).checks||[]).map(c=>`<tr><td>${c.ok?"✅":"❌"}</td><td>${esc(c.check)}</td><td class="dim">${esc(c.detail)}</td></tr>`).join("")}
     </table></details>
@@ -242,6 +327,10 @@ async function designsView(){
       <button class="act ghost" onclick="reviewEntity('/assets/${a.assetId}/review','needsRevision',{gate:'compliance'})">needs revision</button>`:""}
     ${a.qualityStatus==="approved"&&a.complianceStatus==="approved"?`<button class="act" onclick="genListing('${a.assetId}')">generate listing</button>`:""}
   </div>`).join("")}</div>`;
+}
+async function openBundle(assetId){
+  try{ const r = await post(`/assets/${assetId}/open-bundle-folder`); toast("Opened folder: "+r.opened); }
+  catch(err){ toast("Error: "+err.message); }
 }
 async function genListing(assetId){
   toast("Generating listing metadata…", 8000);

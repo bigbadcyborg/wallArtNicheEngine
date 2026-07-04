@@ -1,6 +1,11 @@
 """REST API covering the SRS user flow (§12) and key screens (§13)."""
 import csv
 import io
+import subprocess
+import sys
+from pathlib import Path
+
+from PIL import Image
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -9,8 +14,10 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import get_db
-from .models import (DesignAsset, DesignBrief, Keyword, Listing, NicheReport,
-                     PerformanceRecord, ResearchListing, ReviewLog)
+from .connectors import ai_provider, gemini
+from .models import (DesignAsset, DesignBrief, GeneratedImage, Keyword,
+                     Listing, NicheReport, PerformanceRecord, ResearchListing,
+                     ReviewLog)
 from .modules import (analytics, assets as assets_mod, briefs as briefs_mod,
                       listings as listings_mod, publisher, quality,
                       research, scoring)
@@ -130,6 +137,114 @@ def review_brief(brief_id: str, body: ReviewIn, db: Session = Depends(get_db)):
     return _brief(brief)
 
 
+# ================================================================ image prompt + generation
+
+@router.get("/briefs/{brief_id}/image-prompt")
+def image_prompt(brief_id: str, db: Session = Depends(get_db)):
+    brief = db.get(DesignBrief, brief_id)
+    if not brief:
+        raise HTTPException(404, "brief not found")
+    return {"briefId": brief_id, "nicheName": brief.nicheName,
+            "prompt": ai_provider.build_image_prompt(brief)}
+
+
+class GenerateImageIn(BaseModel):
+    prompt: str
+    aspectRatio: str = "4:5"
+
+
+def _gen_url(g: GeneratedImage) -> str:
+    return "/storage/" + Path(g.filePath).relative_to(settings.storage_dir.resolve()).as_posix()
+
+
+def _gen(g: GeneratedImage) -> dict:
+    return {"id": g.id, "prompt": g.prompt, "aspectRatio": g.aspectRatio,
+            "url": _gen_url(g), "model": g.model, "isPlaceholder": g.isPlaceholder,
+            "attachedAssetId": g.attachedAssetId, "createdAt": g.createdAt.isoformat()}
+
+
+@router.post("/generate-image")
+def generate_image(body: GenerateImageIn, db: Session = Depends(get_db)):
+    """One stateless Gemini call per request — a fresh context every time."""
+    if not body.prompt.strip():
+        raise HTTPException(400, "prompt is required")
+    try:
+        image_bytes, model, placeholder = gemini.generate_image(body.prompt, body.aspectRatio)
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+
+    out_dir = settings.storage_dir.resolve() / "generated"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    row = GeneratedImage(prompt=body.prompt, aspectRatio=body.aspectRatio,
+                         model=model, isPlaceholder=placeholder, filePath="")
+    db.add(row)
+    db.flush()
+    path = out_dir / f"gen-{row.id[:12]}.png"
+    path.write_bytes(image_bytes)
+    row.filePath = str(path)
+    db.commit()
+    db.refresh(row)
+    return _gen(row)
+
+
+@router.get("/generated-images")
+def list_generated(db: Session = Depends(get_db)):
+    rows = db.query(GeneratedImage).order_by(GeneratedImage.createdAt.desc()).limit(60).all()
+    return [_gen(g) for g in rows]
+
+
+class AttachIn(BaseModel):
+    briefId: str
+
+
+@router.post("/generated-images/{image_id}/attach")
+def attach_generated(image_id: str, body: AttachIn, db: Session = Depends(get_db)):
+    """Use a generated image as the master design for an approved brief.
+
+    Enters the normal asset pipeline (exports -> bundle -> QC) with the
+    AI-assisted flag set, so the Etsy AI disclosure is enforced downstream.
+    """
+    gen = db.get(GeneratedImage, image_id)
+    if not gen:
+        raise HTTPException(404, "generated image not found")
+    brief = db.get(DesignBrief, body.briefId)
+    if not brief:
+        raise HTTPException(404, "brief not found")
+
+    image_bytes = Path(gen.filePath).read_bytes()
+    upscaled_from = None
+    with Image.open(io.BytesIO(image_bytes)) as im:
+        w, h = im.size
+        if w * h < quality.MIN_MASTER_PIXELS:
+            scale = (quality.MIN_MASTER_PIXELS / (w * h)) ** 0.5 * 1.05
+            resized = im.convert("RGB").resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+            buf = io.BytesIO()
+            resized.save(buf, "PNG", dpi=(300, 300))
+            image_bytes = buf.getvalue()
+            upscaled_from = f"{w}x{h}"
+
+    try:
+        asset = assets_mod.create_asset(db, brief, image_bytes, "generated.png", is_ai_assisted=True)
+        assets_mod.export_ratios(db, asset)
+        assets_mod.build_bundle(db, asset)
+        quality.run_checks(db, asset)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    if upscaled_from:
+        report = dict(asset.qualityReport)
+        report["checks"] = report.get("checks", []) + [{
+            "check": "upscaledFromSource", "ok": True,
+            "detail": f"model output was {upscaled_from}px and was upscaled to meet the "
+                      "print minimum — verify sharpness manually before approving",
+        }]
+        asset.qualityReport = report
+
+    gen.attachedAssetId = asset.assetId
+    db.commit()
+    return _asset(asset)
+
+
 # ================================================================ assets
 
 @router.post("/briefs/{brief_id}/assets")
@@ -155,6 +270,53 @@ async def upload_asset(brief_id: str, file: UploadFile = File(...),
 @router.get("/assets")
 def list_assets(db: Session = Depends(get_db)):
     return [_asset(a) for a in db.query(DesignAsset).order_by(DesignAsset.createdAt.desc()).all()]
+
+
+def _is_wsl() -> bool:
+    if sys.platform != "linux":
+        return False
+    try:
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except OSError:
+        return False
+
+
+def _normalize_stored_path(raw: str) -> Path:
+    """DB rows may hold paths written from the 'other side' of a WSL setup."""
+    if sys.platform == "win32" and raw.startswith("/mnt/") and len(raw) > 6:
+        return Path(f"{raw[5].upper()}:{raw[6:]}")            # /mnt/c/x -> C:/x
+    if _is_wsl() and len(raw) > 2 and raw[1] == ":":
+        return Path(f"/mnt/{raw[0].lower()}{raw[2:]}".replace("\\", "/"))  # C:\x -> /mnt/c/x
+    return Path(raw)
+
+
+@router.post("/assets/{asset_id}/open-bundle-folder")
+def open_bundle_folder(asset_id: str, db: Session = Depends(get_db)):
+    """Open the ZIP bundle's folder in the local file manager.
+
+    Only meaningful when the browser and server run on the same machine,
+    which is the MVP's single-user setup.
+    """
+    asset = db.get(DesignAsset, asset_id)
+    if not asset:
+        raise HTTPException(404, "asset not found")
+    bundle = _normalize_stored_path(asset.bundlePath).resolve() if asset.bundlePath else None
+    if not bundle or not bundle.exists():
+        raise HTTPException(404, "no bundle built for this asset yet")
+
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select,", str(bundle)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(bundle)])
+        elif _is_wsl():
+            win_path = subprocess.check_output(["wslpath", "-w", str(bundle)], text=True).strip()
+            subprocess.Popen(["explorer.exe", "/select,", win_path])
+        else:
+            subprocess.Popen(["xdg-open", str(bundle.parent)])
+    except OSError as e:
+        raise HTTPException(500, f"could not open file manager: {e}")
+    return {"opened": str(bundle.parent), "selected": bundle.name}
 
 
 class AssetReviewIn(ReviewIn):

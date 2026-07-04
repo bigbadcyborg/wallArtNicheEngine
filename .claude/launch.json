@@ -4,8 +4,9 @@
     {
       "name": "wallart",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--port", "8000"],
-      "port": 8000
+      "runtimeArgs": ["run.py"],
+      "port": 8000,
+      "autoPort": true
     }
   ]
 }

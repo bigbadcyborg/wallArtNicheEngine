@@ -11,8 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 _tmp = tempfile.mkdtemp(prefix="wallart-test-")
 os.environ["DATABASE_URL"] = f"sqlite:///{Path(_tmp) / 'test.db'}"
 os.environ["STORAGE_DIR"] = str(Path(_tmp) / "storage")
-os.environ.pop("ANTHROPIC_API_KEY", None)
-os.environ.pop("ETSY_API_KEY", None)
+# Force offline mode. Empty strings (not pops) so the app's .env loader,
+# which uses os.environ.setdefault, cannot re-inject real keys from .env.
+for _key in ("ANTHROPIC_API_KEY", "ETSY_API_KEY", "ETSY_SHOP_ID",
+             "ETSY_ACCESS_TOKEN", "GEMINI_API_KEY"):
+    os.environ[_key] = ""
 
 from app.database import Base, engine, SessionLocal  # noqa: E402
 from app import models  # noqa: E402, F401

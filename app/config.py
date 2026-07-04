@@ -28,6 +28,8 @@ _load_dotenv()
 class Settings:
     database_url: str = os.environ.get("DATABASE_URL", f"sqlite:///{PROJECT_ROOT / 'wallart.db'}")
     anthropic_api_key: str | None = os.environ.get("ANTHROPIC_API_KEY")
+    gemini_api_key: str | None = os.environ.get("GEMINI_API_KEY")
+    gemini_image_model: str = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
     etsy_api_key: str | None = os.environ.get("ETSY_API_KEY")
     etsy_shop_id: str | None = os.environ.get("ETSY_SHOP_ID")
     etsy_access_token: str | None = os.environ.get("ETSY_ACCESS_TOKEN")

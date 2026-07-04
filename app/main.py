@@ -19,9 +19,12 @@ async def lifespan(app: FastAPI):
     yield
 
 
+settings.storage_dir.mkdir(parents=True, exist_ok=True)
+
 app = FastAPI(title="wallArtNicheEngine", version="0.1.0", lifespan=lifespan)
 app.include_router(router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/storage", StaticFiles(directory=settings.storage_dir), name="storage")
 
 
 @app.get("/", include_in_schema=False)
