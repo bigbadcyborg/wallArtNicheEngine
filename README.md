@@ -54,6 +54,35 @@ Compliance guardrails:
 Scoring weights and thresholds are in [config/scoring.yaml](config/scoring.yaml)
 (the SRS §7.2 draft formula, editable without code changes).
 
+## ComfyUI image generation
+
+To use local ComfyUI image generation, start ComfyUI on your machine using your
+normal ComfyUI launch command. The app expects the default ComfyUI server URL to
+be available at http://127.0.0.1:8188.
+
+Set these environment variables before starting the app:
+
+```env
+IMAGE_PROVIDER=comfyui
+COMFYUI_BASE_URL=http://127.0.0.1:8188
+COMFYUI_WORKFLOW_PATH=config/comfyui/wall_art_sdxl_txt2img.json
+```
+
+Expected app flow when generating AI-assisted wall art assets:
+
+1. Research keyword.
+2. Approve niche.
+3. Generate briefs.
+4. Approve brief.
+5. Get the image prompt from `/api/briefs/{brief_id}/image-prompt`.
+6. Generate the image with `/api/generate-image`.
+7. Attach the generated image to the brief.
+8. Review quality/compliance.
+9. Generate the listing only after approval.
+
+AI-assisted assets still require Etsy AI disclosure and human review before any
+listing is generated or published as an Etsy draft.
+
 ## Layout
 
 ```
@@ -86,6 +115,5 @@ Token refresh automation is a follow-up (SRS iteration 2/7 hardening).
 ## Not in the MVP (per SRS §3.2)
 
 Automatic Amazon Merch publishing, scraping of any kind, competitor asset reuse,
-image *generation* (designs are uploaded — AI or human-made — and processed),
-mockup generator (iteration 8), and Etsy sales sync (iteration 10 records
-performance manually for now).
+automated image publishing without human review, mockup generator (iteration 8),
+and Etsy sales sync (iteration 10 records performance manually for now).
