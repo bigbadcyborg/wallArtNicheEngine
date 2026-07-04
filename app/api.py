@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import get_db
-from .connectors import ai_provider, gemini
+from .connectors import ai_provider, comfyui, gemini, placeholder
 from .models import (DesignAsset, DesignBrief, GeneratedImage, Keyword,
                      Listing, NicheReport, PerformanceRecord, ResearchListing,
                      ReviewLog)
@@ -163,13 +163,22 @@ def _gen(g: GeneratedImage) -> dict:
             "attachedAssetId": g.attachedAssetId, "createdAt": g.createdAt.isoformat()}
 
 
+def _selected_image_provider():
+    providers = {
+        "gemini": gemini.generate_image,
+        "comfyui": comfyui.generate_image,
+        "placeholder": placeholder.generate_image,
+    }
+    return providers[settings.normalized_image_provider]
+
+
 @router.post("/generate-image")
 def generate_image(body: GenerateImageIn, db: Session = Depends(get_db)):
-    """One stateless Gemini call per request — a fresh context every time."""
+    """Generate an image through the configured image provider."""
     if not body.prompt.strip():
         raise HTTPException(400, "prompt is required")
     try:
-        image_bytes, model, placeholder = gemini.generate_image(body.prompt, body.aspectRatio)
+        image_bytes, model, placeholder = _selected_image_provider()(body.prompt, body.aspectRatio)
     except RuntimeError as e:
         raise HTTPException(502, str(e))
 

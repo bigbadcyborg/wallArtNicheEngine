@@ -7,14 +7,12 @@ Without GEMINI_API_KEY a labeled placeholder image is produced so the rest of
 the pipeline (attach -> exports -> QC) stays testable offline.
 """
 import base64
-import io
 import logging
-import textwrap
 
 import httpx
-from PIL import Image, ImageDraw
 
 from ..config import settings
+from .placeholder import generate_placeholder_image
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +22,7 @@ API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 def generate_image(prompt: str, aspect_ratio: str = "4:5") -> tuple[bytes, str, bool]:
     """Return (image_bytes, model_label, is_placeholder)."""
     if not settings.gemini_api_key:
-        return _placeholder(prompt, aspect_ratio), "placeholder", True
+        return generate_placeholder_image(prompt, aspect_ratio), "placeholder", True
 
     url = f"{API_BASE}/{settings.gemini_image_model}:generateContent"
     headers = {"x-goog-api-key": settings.gemini_api_key, "Content-Type": "application/json"}
@@ -73,23 +71,3 @@ def _extract_image(data: dict) -> bytes | None:
             return base64.b64decode(inline["data"])
     return None
 
-
-_PLACEHOLDER_SIZES = {"2:3": (4000, 6000), "3:4": (3900, 5200), "4:5": (4000, 5000),
-                      "1:1": (4200, 4200), "9:16": (2880, 5120)}
-
-
-def _placeholder(prompt: str, aspect_ratio: str) -> bytes:
-    w, h = _PLACEHOLDER_SIZES.get(aspect_ratio, (4000, 5000))
-    img = Image.new("RGB", (w, h))
-    top, bottom = (216, 196, 166), (140, 111, 78)
-    for y in range(h):  # simple vertical gradient
-        t = y / h
-        img.paste(tuple(int(a + (b - a) * t) for a, b in zip(top, bottom)), (0, y, w, y + 1))
-    draw = ImageDraw.Draw(img)
-    lines = ["PLACEHOLDER IMAGE", "set GEMINI_API_KEY for real generation", "", "prompt:"]
-    lines += textwrap.wrap(prompt, width=48)[:14]
-    draw.multiline_text((w * 0.08, h * 0.30), "\n".join(lines), fill=(40, 30, 20),
-                        font_size=int(w * 0.028), spacing=int(w * 0.014))
-    buf = io.BytesIO()
-    img.save(buf, "PNG", dpi=(300, 300))
-    return buf.getvalue()
