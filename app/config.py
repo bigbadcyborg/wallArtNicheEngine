@@ -7,6 +7,7 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = PROJECT_ROOT / "config"
+IMAGE_PROVIDERS = {"gemini", "comfyui", "placeholder"}
 
 
 def _load_dotenv() -> None:
@@ -28,12 +29,20 @@ _load_dotenv()
 class Settings:
     database_url: str = os.environ.get("DATABASE_URL", f"sqlite:///{PROJECT_ROOT / 'wallart.db'}")
     anthropic_api_key: str | None = os.environ.get("ANTHROPIC_API_KEY")
+    image_provider: str = os.environ.get("IMAGE_PROVIDER", "gemini").strip().lower()
     gemini_api_key: str | None = os.environ.get("GEMINI_API_KEY")
     gemini_image_model: str = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
     etsy_api_key: str | None = os.environ.get("ETSY_API_KEY")
     etsy_shop_id: str | None = os.environ.get("ETSY_SHOP_ID")
     etsy_access_token: str | None = os.environ.get("ETSY_ACCESS_TOKEN")
     storage_dir: Path = Path(os.environ.get("STORAGE_DIR", PROJECT_ROOT / "storage"))
+
+    @property
+    def normalized_image_provider(self) -> str:
+        """Configured image provider, constrained to supported connector names."""
+        if self.image_provider not in IMAGE_PROVIDERS:
+            return "placeholder"
+        return self.image_provider
 
     @property
     def etsy_configured(self) -> bool:

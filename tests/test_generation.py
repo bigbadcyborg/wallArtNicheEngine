@@ -81,6 +81,34 @@ def test_generate_and_attach_via_api(db, approved_brief):
         app.dependency_overrides.clear()
 
 
+def test_generate_image_delegates_to_selected_provider(monkeypatch, db):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app import api
+
+    calls = []
+
+    def fake_comfyui(prompt, aspect_ratio):
+        calls.append((prompt, aspect_ratio))
+        return gemini.generate_image(prompt, aspect_ratio)
+
+    _override_db(app, db)
+    monkeypatch.setattr(api.settings, "image_provider", "comfyui")
+    monkeypatch.setattr(api.comfyui, "generate_image", fake_comfyui)
+    client = TestClient(app)
+    try:
+        r = client.post("/api/generate-image", json={"prompt": "soft botanical print", "aspectRatio": "1:1"})
+        assert r.status_code == 200, r.text
+        gen = r.json()
+        assert calls == [("soft botanical print", "1:1")]
+        assert set(gen) == {
+            "id", "url", "prompt", "aspectRatio", "model", "isPlaceholder",
+            "attachedAssetId", "createdAt",
+        }
+    finally:
+        app.dependency_overrides.clear()
+        monkeypatch.setattr(api.settings, "image_provider", "gemini")
+
 def test_generate_image_rejects_empty_prompt(db):
     from fastapi.testclient import TestClient
     from app.main import app
