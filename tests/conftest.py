@@ -14,7 +14,8 @@ os.environ["STORAGE_DIR"] = str(Path(_tmp) / "storage")
 # Force offline mode. Empty strings (not pops) so the app's .env loader,
 # which uses os.environ.setdefault, cannot re-inject real keys from .env.
 for _key in ("ANTHROPIC_API_KEY", "ETSY_API_KEY", "ETSY_SHOP_ID",
-             "ETSY_ACCESS_TOKEN", "GEMINI_API_KEY"):
+             "ETSY_ACCESS_TOKEN", "GEMINI_API_KEY", "IMAGE_PROVIDER",
+             "COMFYUI_BASE_URL", "COMFYUI_PLACEHOLDER_ON_FAILURE"):
     os.environ[_key] = ""
 
 from app.database import Base, engine, SessionLocal  # noqa: E402
